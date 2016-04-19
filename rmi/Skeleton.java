@@ -1,6 +1,14 @@
 package rmi;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.*;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 /** RMI skeleton
 
@@ -26,6 +34,116 @@ import java.net.*;
 */
 public class Skeleton<T>
 {
+    //Private member variables
+    private Class<T> interfaceClass;
+    private T server;
+    private InetSocketAddress address;
+    private ListeningThread listeningThread;
+    private Set<ServiceThread> serviceThreads = new HashSet<>();
+
+    public InetSocketAddress getAddress() {
+        return address;
+    }
+
+    public void setAddress(InetSocketAddress address) {
+        this.address = address;
+    }
+
+    //Definition of ListeningThread class
+    private class ListeningThread<T> extends Thread {
+
+        private boolean stopSignal;
+        private ListeningThread()
+        {
+            stopSignal = false;
+        }
+
+        @Override
+        public void run() {
+            ServerSocket serverSocket = null;
+            try
+            {
+                if(address == null)
+                {
+                    // TODO: fix this
+                }
+                else
+                {
+                    serverSocket = new ServerSocket(address.getPort());
+                }
+                while (!stopSignal) {
+                    try {
+                        serverSocket.setSoTimeout(10); //TODO - change the timeout value
+                        ServiceThread new_thread = new ServiceThread(serverSocket.accept());
+                        new_thread.start();
+                    } catch (SocketTimeoutException e) {
+                        // Ignoring the timeout
+                    }
+                }
+                // Exited safely
+                Skeleton.this.stopped(null);
+            }
+            catch (IOException e) {
+                e.printStackTrace();
+                Skeleton.this.stopped(e);
+            }
+            finally {
+                if (serverSocket != null) {
+                    try {
+                        serverSocket.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
+                    }
+                }
+            }
+        }
+    }
+
+    //Definition of ServiceThread class
+    private class ServiceThread extends Thread {
+        private Socket socket;
+        public ServiceThread(Socket socket) {
+            this.socket = socket;
+            serviceThreads.add(this);
+        }
+
+        @Override
+        public void run() {
+            try {
+                ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                out.flush();
+                ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+
+                String methodName = (String) in.readObject();
+                Class[] parameterTypes = (Class[]) in.readObject();
+                Object[] args = (Object[]) in.readObject();
+
+                Method method;
+                if (parameterTypes == null) {
+                    method = interfaceClass.getMethod(methodName);
+                    out.writeObject(method.invoke(server));
+                } else {
+                    method = interfaceClass.getMethod(methodName, parameterTypes);
+                    out.writeObject(method.invoke(server, args));
+                }
+
+                out.flush();
+                out.close();
+                in.close();
+            } catch (IOException | ClassNotFoundException | NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+                //TODO - if there is any exception, send it to the client
+                e.printStackTrace();
+            } finally {
+                serviceThreads.remove(this);
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
     /** Creates a <code>Skeleton</code> with no initial server address. The
         address will be determined by the system when <code>start</code> is
         called. Equivalent to using <code>Skeleton(null)</code>.
@@ -45,9 +163,32 @@ public class Skeleton<T>
         @throws NullPointerException If either of <code>c</code> or
                                      <code>server</code> is <code>null</code>.
      */
-    public Skeleton(Class<T> c, T server)
+    public Skeleton(Class<T> interfaceClass, T server)
     {
-        throw new UnsupportedOperationException("not implemented");
+        //Checks for null and unsupported class
+        if(server == null || interfaceClass == null)
+        {
+            throw new NullPointerException("Server is null");
+        }
+        if(interfaceClass == null)
+        {
+            throw new NullPointerException("Class is null");
+        }
+        Method methods[] = interfaceClass.getDeclaredMethods();
+        for(int i = 0; i < methods.length; i++)
+        {
+            Class<?>[] exceptionTypes = methods[i].getExceptionTypes();
+
+            if (Arrays.asList(exceptionTypes).contains(RMIException.class) == false) {
+                throw new UnsupportedOperationException("Given class does not represent remote interface");
+            }
+        }
+        //Set the member variables to the parameters passed
+        this.interfaceClass = interfaceClass;
+        this.server = server;
+        //set the address to null
+        this.address = null;
+        //throw new UnsupportedOperationException("not implemented");
     }
 
     /** Creates a <code>Skeleton</code> with the given initial server address.
@@ -68,9 +209,29 @@ public class Skeleton<T>
         @throws NullPointerException If either of <code>c</code> or
                                      <code>server</code> is <code>null</code>.
      */
-    public Skeleton(Class<T> c, T server, InetSocketAddress address)
+    public Skeleton(Class<T> interfaceClass, T server, InetSocketAddress address)
     {
-        throw new UnsupportedOperationException("not implemented");
+        //Checks for null and unsupported class
+        if(server == null || interfaceClass == null)
+        {
+            throw new NullPointerException("Server is null");
+        }
+        if(interfaceClass == null)
+        {
+            throw new NullPointerException("Class is null");
+        }
+        for(Method method : interfaceClass.getDeclaredMethods())
+        {
+            Class<?>[] exceptionTypes = method.getExceptionTypes();
+
+            if (!Arrays.asList(exceptionTypes).contains(RMIException.class)) {
+                throw new Error("Given class does not represent remote interface");
+            }
+        }
+        //Set the member variables to the parameters passed
+        this.interfaceClass = interfaceClass;
+        this.server = server;
+        this.address = address;
     }
 
     /** Called when the listening thread exits.
@@ -93,6 +254,21 @@ public class Skeleton<T>
      */
     protected void stopped(Throwable cause)
     {
+        while  (!serviceThreads.isEmpty()) {
+            try {
+                Thread t = null;
+                synchronized (serviceThreads) {
+                    if (!serviceThreads.isEmpty()) {
+                        t = serviceThreads.iterator().next();
+                    } else {
+                        return;
+                    }
+                }
+                t.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
+            }
+        }
     }
 
     /** Called when an exception occurs at the top level in the listening
@@ -141,7 +317,13 @@ public class Skeleton<T>
      */
     public synchronized void start() throws RMIException
     {
-        throw new UnsupportedOperationException("not implemented");
+        if(listeningThread == null)
+            listeningThread = new ListeningThread();
+        else
+        {
+            //TODO - throw some exception
+        }
+        //throw new UnsupportedOperationException("not implemented");
     }
 
     /** Stops the skeleton server, if it is already running.
@@ -155,6 +337,9 @@ public class Skeleton<T>
      */
     public synchronized void stop()
     {
-        throw new UnsupportedOperationException("not implemented");
+        if(listeningThread != null && listeningThread.isAlive() == true)
+        {
+            listeningThread.stopSignal = true;
+        }
     }
 }
