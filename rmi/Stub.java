@@ -184,6 +184,9 @@ public abstract class Stub implements Serializable {
             in.close();
             out.close();
             socket.close();
+            if (result instanceof Exception) {
+                throw (Exception) result;
+            }
             return result;
         }
     }
