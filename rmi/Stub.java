@@ -192,10 +192,6 @@ public abstract class Stub implements Serializable {
     }
 
     private static <T> void validateClass(Class<T> c) {
-        if (!Arrays.asList(c.getInterfaces()).contains(Remote.class)) {
-            throw new Error("Class " + c.getCanonicalName() + " must implement " + Remote.class.getCanonicalName() + " to be used as remote interface");
-        }
-
         for (Method m : c.getMethods()) {
             if (!Arrays.asList(m.getExceptionTypes()).contains(RMIException.class)) {
                 throw new Error("Every method of " + c.getCanonicalName() +

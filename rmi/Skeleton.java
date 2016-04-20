@@ -184,7 +184,7 @@ public class Skeleton<T> {
             Class<?>[] exceptionTypes = method.getExceptionTypes();
 
             if (!Arrays.asList(exceptionTypes).contains(RMIException.class)) {
-                throw new UnsupportedOperationException("Given class does not represent remote interface");
+                throw new Error("Given class does not represent remote interface");
             }
         }
         //Set the member variables to the parameters passed
