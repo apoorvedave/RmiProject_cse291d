@@ -5,7 +5,10 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.*;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -34,9 +37,14 @@ import java.util.Set;
  or <code>service_error</code>.
  */
 public class Skeleton<T> {
-    //Private member variables
+
+    private static final int MAX_PORT = 65535;
     private Class<T> interfaceClass;
+
+    //Private member variables
+    private static final int MIN_PORT = 49152;
     private T server;
+    private ServerSocket serverSocket;
     private InetSocketAddress address;
     private ListeningThread listeningThread;
     private final Set<ServiceThread> serviceThreads = new HashSet<>();
@@ -52,42 +60,40 @@ public class Skeleton<T> {
     //Definition of ListeningThread class
     private class ListeningThread extends Thread {
 
-        private boolean stopSignal;
-
-        private ListeningThread() {
-            stopSignal = false;
-        }
+        private boolean stopSignal = false;
 
         @Override
         public void run() {
-            ServerSocket serverSocket = null;
             try {
-                if (address == null) {
-                    // TODO: fix this
-                } else {
-                    serverSocket = new ServerSocket(address.getPort());
-                }
-                while (!stopSignal) {
+                // Run Server
+                while (true) {
                     try {
-                        serverSocket.setSoTimeout(10); //TODO - change the timeout value
                         ServiceThread new_thread = new ServiceThread(serverSocket.accept());
                         new_thread.start();
-                    } catch (SocketTimeoutException e) {
-                        // Ignoring the timeout
+                    } catch (IOException e) {
+
+                        if (stopSignal) {
+                            // User closed the server by choice
+                            stopped(null);
+                            break;
+                        } else {
+                            // Some unforseen exception occurred
+                            if (listen_error(e)) {
+                                // if true, server needs to continue accepting connections
+                                continue;
+                            } else {
+                                // else server needs to stop
+                                stopped(e);
+                                break;
+                            }
+                        }
                     }
                 }
-                // Exited safely
-                Skeleton.this.stopped(null);
-            } catch (IOException e) {
-                e.printStackTrace();
-                Skeleton.this.stopped(e);
             } finally {
-                if (serverSocket != null) {
-                    try {
-                        serverSocket.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
-                    }
+                try {
+                    serverSocket.close();
+                } catch (IOException e) {
+                    System.out.println("Could not close server socket, " + e);
                 }
             }
         }
@@ -116,23 +122,20 @@ public class Skeleton<T> {
                 Object[] args = (Object[]) in.readObject();
 
                 Method method;
-                if (parameterTypes == null) {
-                    method = interfaceClass.getMethod(methodName);
-                    out.writeObject(method.invoke(server));
-                } else {
-                    method = interfaceClass.getMethod(methodName, parameterTypes);
-                    out.writeObject(method.invoke(server, args));
-                }
-
-
-            } catch (Exception e) {
-                if (out != null) {
-                    try {
-                        out.writeObject(new RMIException(e));
-                    } catch (IOException e1) {
-                        e1.printStackTrace();
+                method = interfaceClass.getMethod(methodName, parameterTypes);
+                Object result = null;
+                try {
+                    result = method.invoke(server, args);
+                    out.writeObject("PASSED");
+                    if (!method.getReturnType().equals(Void.TYPE)) {
+                        out.writeObject(result);
                     }
+                } catch (InvocationTargetException e) {
+                    out.writeObject("FAILED");
+                    out.writeObject(e.getTargetException());
                 }
+            } catch (Exception e) {
+                service_error(new RMIException(e));
             } finally {
                 serviceThreads.remove(this);
                 try {
@@ -149,6 +152,7 @@ public class Skeleton<T> {
                 }
             }
         }
+
     }
 
     /**
@@ -161,11 +165,11 @@ public class Skeleton<T> {
      bootstrapping RMI - those that therefore do not require a well-known
      port.
 
-     @param c An object representing the class of the interface for which the
+     @param interfaceClass An object representing the class of the interface for which the
      skeleton server is to handle method call requests.
      @param server An object implementing said interface. Requests for method
      calls are forwarded by the skeleton to this object.
-     @throws Error If <code>c</code> does not represent a remote interface -
+     @throws Error If <code>interfaceClass</code> does not represent a remote interface -
      an interface whose methods are all marked as throwing
      <code>RMIException</code>.
      @throws NullPointerException If either of <code>c</code> or
@@ -179,6 +183,11 @@ public class Skeleton<T> {
         if (interfaceClass == null) {
             throw new NullPointerException("Class is null");
         }
+
+        if (!interfaceClass.isInterface()) {
+            throw new Error("Given class does not represent remote interface");
+        }
+
         Method methods[] = interfaceClass.getDeclaredMethods();
         for (Method method : methods) {
             Class<?>[] exceptionTypes = method.getExceptionTypes();
@@ -190,9 +199,6 @@ public class Skeleton<T> {
         //Set the member variables to the parameters passed
         this.interfaceClass = interfaceClass;
         this.server = server;
-        //set the address to null
-        this.address = null;
-        //throw new UnsupportedOperationException("not implemented");
     }
 
     /**
@@ -201,7 +207,7 @@ public class Skeleton<T> {
      <p>
      This constructor should be used when the port number is significant.
 
-     @param c An object representing the class of the interface for which the
+     @param interfaceClass An object representing the class of the interface for which the
      skeleton server is to handle method call requests.
      @param server An object implementing said interface. Requests for method
      calls are forwarded by the skeleton to this object.
@@ -222,6 +228,11 @@ public class Skeleton<T> {
         if (interfaceClass == null) {
             throw new NullPointerException("Class is null");
         }
+
+        if (!interfaceClass.isInterface()) {
+            throw new Error("Given class does not represent remote interface");
+        }
+
         for (Method method : interfaceClass.getDeclaredMethods()) {
             Class<?>[] exceptionTypes = method.getExceptionTypes();
 
@@ -257,7 +268,7 @@ public class Skeleton<T> {
     protected void stopped(Throwable cause) {
         while (!serviceThreads.isEmpty()) {
             try {
-                Thread t = null;
+                Thread t;
                 synchronized (serviceThreads) {
                     if (!serviceThreads.isEmpty()) {
                         t = serviceThreads.iterator().next();
@@ -318,12 +329,41 @@ public class Skeleton<T> {
      not since stopped.
      */
     public synchronized void start() throws RMIException {
+
+        // Checks
         if (listeningThread == null) {
             listeningThread = new ListeningThread();
         } else if (listeningThread.isAlive()) {
             throw new RMIException("Server already running");
         }
-        listeningThread.start();
+
+        // Create Server socket if not present else use it
+        try {
+            if (address == null) {
+                String localIp = InetAddress.getLocalHost().getHostAddress();
+                // Option 1: Get some free port and assign: moving with this
+                for (int i = MIN_PORT; i < MAX_PORT; i++) {
+                    try {
+                        serverSocket = new ServerSocket(i);
+                        address = new InetSocketAddress(localIp, serverSocket.getLocalPort());
+                        System.out.println(address);
+                        break;
+                    } catch (IOException e) {
+                        // keep searching
+                    }
+                }
+                // TODO: Option 2: throw error
+
+            } else if (serverSocket == null) {
+                serverSocket = new ServerSocket(address.getPort());
+            }
+
+            // Starting listening thread
+            listeningThread.start();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -339,6 +379,11 @@ public class Skeleton<T> {
     public synchronized void stop() {
         if (listeningThread != null && listeningThread.isAlive()) {
             listeningThread.stopSignal = true;
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 }

@@ -3,9 +3,12 @@ package rmi;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
-import java.lang.reflect.*;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.net.*;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 
 /**
@@ -65,7 +68,7 @@ public abstract class Stub implements Serializable {
         }
 
         try {
-            InvocationHandler handler = new StubInvocationHandler(skeleton.getAddress());
+            InvocationHandler handler = new StubInvocationHandler(skeleton.getAddress(), c);
             return (T) Proxy.newProxyInstance(c.getClassLoader(), new Class[]{c}, handler);
         } catch (Exception e) {
             throw new Error("Stub for remote interface " + c.getCanonicalName() + " could not be created: " + e);
@@ -107,7 +110,6 @@ public abstract class Stub implements Serializable {
 
         if (c == null || skeleton == null || hostname == null || hostname.equals("")) {
             throw new NullPointerException("Either of Class<T> or Skeleton<T> or hostname is null");
-
         }
 
         validateClass(c);
@@ -118,7 +120,7 @@ public abstract class Stub implements Serializable {
 
         try {
             InetSocketAddress address = new InetSocketAddress(hostname, skeleton.getAddress().getPort());
-            InvocationHandler handler = new StubInvocationHandler(address);
+            InvocationHandler handler = new StubInvocationHandler(address, c);
             return (T) Proxy.newProxyInstance(c.getClassLoader(), new Class[]{c}, handler);
         } catch (Exception e) {
             throw new Error("Stub for remote interface " + c.getCanonicalName() + " could not be created: " + e);
@@ -151,43 +153,88 @@ public abstract class Stub implements Serializable {
         validateClass(c);
 
         try {
-            InvocationHandler handler = new StubInvocationHandler(address);
+            InvocationHandler handler = new StubInvocationHandler(address, c);
             return (T) Proxy.newProxyInstance(c.getClassLoader(), new Class[]{c}, handler);
         } catch (Exception e) {
             throw new Error("Stub for remote interface " + c.getCanonicalName() + " could not be created: " + e);
         }
     }
 
-    private static class StubInvocationHandler implements InvocationHandler, Serializable {
+    private static class StubInvocationHandler<T> implements InvocationHandler, Serializable {
 
+        private Class<T> interfaceClass;
         private InetSocketAddress address;
 
-        private StubInvocationHandler(InetSocketAddress address) {
+        private StubInvocationHandler(InetSocketAddress address, Class interfaceClass) {
             this.address = address;
+            this.interfaceClass = interfaceClass;
+        }
+
+        public Class getInterfaceClass() {
+            return interfaceClass;
+        }
+
+        public InetSocketAddress getAddress() {
+            return address;
         }
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-            Socket socket = new Socket(address.getHostName(), address.getPort());
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-            out.flush();
-            out.writeObject(method.getName());
-            out.writeObject(method.getParameterTypes());
-            out.writeObject(args);
 
-            out.flush();
-            if (method.getReturnType().equals(Void.TYPE)) {
-                return null;
+            if (method.equals(Object.class.getMethod("equals", Object.class))) {
+                if (args[0] instanceof Proxy) {
+                    StubInvocationHandler handler = (StubInvocationHandler) Proxy.getInvocationHandler((Proxy) args[0]);
+                    return interfaceClass.equals(handler.getInterfaceClass()) && address.equals(handler.getAddress());
+                }
+                return false;
+                // alternately can match tostrings of both
             }
-            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
-            Object result = in.readObject();
-            in.close();
-            out.close();
-            socket.close();
-            if (result instanceof Exception) {
-                throw (Exception) result;
+
+            if (method.equals(Object.class.getMethod("hashCode"))) {
+                return interfaceClass.hashCode() * address.hashCode();
             }
-            return result;
+
+            if (method.equals(Object.class.getMethod("toString"))) {
+                return interfaceClass.getCanonicalName() + " " + address.toString();
+            }
+
+            try {
+                Socket socket = new Socket(address.getHostName(), address.getPort());
+                ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                out.flush();
+                out.writeObject(method.getName());
+                out.writeObject(method.getParameterTypes());
+                out.writeObject(args);
+                out.flush();
+
+                // Read result pass or fail
+                ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+                Object success = in.readObject();
+
+                if (success.equals("FAILED")) {
+                    Object error = in.readObject();
+                    in.close();
+                    out.close();
+                    socket.close();
+                    throw (Exception) error;
+                }
+
+                Object result = null;
+
+                if (!method.getReturnType().equals(Void.TYPE)) {
+                    result = in.readObject();
+                }
+
+                in.close();
+                out.close();
+                socket.close();
+                return result;
+            } catch (Exception e) {
+                if (Arrays.asList(method.getExceptionTypes()).contains(e.getClass())){
+                    throw e;
+                }
+                throw new RMIException(e);
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 package conformance.rmi;
 
 import rmi.RMIException;
+
 import java.io.FileNotFoundException;
 
 /** Simple interface for an RMI server.

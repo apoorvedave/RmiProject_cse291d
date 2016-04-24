@@ -109,6 +109,11 @@ public class SkeletonTest extends Test
      */
     private boolean probe()
     {
+        try {
+            Thread.sleep(10);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
         Socket      socket = new Socket();
 
         try
