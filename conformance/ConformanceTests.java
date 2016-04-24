@@ -26,8 +26,8 @@ public class ConformanceTests
         Class<? extends Test>[]     tests =
             new Class[] {conformance.rmi.SkeletonTest.class,
                          conformance.rmi.StubTest.class,
-                         conformance.rmi.ConnectionTest.class};/*,
-                         conformance.rmi.ThreadTest.class};*/
+                         conformance.rmi.ConnectionTest.class,
+                         conformance.rmi.ThreadTest.class};
         Series                      series = new Series(tests);
         SeriesReport                report = series.run(10000, System.out);
 

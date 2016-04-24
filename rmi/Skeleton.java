@@ -39,121 +39,15 @@ import java.util.Set;
 public class Skeleton<T> {
 
     private static final int MAX_PORT = 65535;
-    private Class<T> interfaceClass;
-
-    //Private member variables
     private static final int MIN_PORT = 49152;
+
+    /* Private member variables */
+    private Class<T> interfaceClass;
     private T server;
     private ServerSocket serverSocket;
     private InetSocketAddress address;
     private ListeningThread listeningThread;
     private final Set<ServiceThread> serviceThreads = new HashSet<>();
-
-    public InetSocketAddress getAddress() {
-        return address;
-    }
-
-    public void setAddress(InetSocketAddress address) {
-        this.address = address;
-    }
-
-    //Definition of ListeningThread class
-    private class ListeningThread extends Thread {
-
-        private boolean stopSignal = false;
-
-        @Override
-        public void run() {
-            try {
-                // Run Server
-                while (true) {
-                    try {
-                        ServiceThread new_thread = new ServiceThread(serverSocket.accept());
-                        new_thread.start();
-                    } catch (IOException e) {
-
-                        if (stopSignal) {
-                            // User closed the server by choice
-                            stopped(null);
-                            break;
-                        } else {
-                            // Some unforseen exception occurred
-                            if (listen_error(e)) {
-                                // if true, server needs to continue accepting connections
-                                continue;
-                            } else {
-                                // else server needs to stop
-                                stopped(e);
-                                break;
-                            }
-                        }
-                    }
-                }
-            } finally {
-                try {
-                    serverSocket.close();
-                } catch (IOException e) {
-                    System.out.println("Could not close server socket, " + e);
-                }
-            }
-        }
-    }
-
-    //Definition of ServiceThread class
-    private class ServiceThread extends Thread {
-        private Socket socket;
-
-        public ServiceThread(Socket socket) {
-            this.socket = socket;
-            serviceThreads.add(this);
-        }
-
-        @Override
-        public void run() {
-            ObjectInputStream in = null;
-            ObjectOutputStream out = null;
-            try {
-                out = new ObjectOutputStream(socket.getOutputStream());
-                out.flush();
-                in = new ObjectInputStream(socket.getInputStream());
-
-                String methodName = (String) in.readObject();
-                Class[] parameterTypes = (Class[]) in.readObject();
-                Object[] args = (Object[]) in.readObject();
-
-                Method method;
-                method = interfaceClass.getMethod(methodName, parameterTypes);
-                Object result = null;
-                try {
-                    result = method.invoke(server, args);
-                    out.writeObject("PASSED");
-                    if (!method.getReturnType().equals(Void.TYPE)) {
-                        out.writeObject(result);
-                    }
-                } catch (InvocationTargetException e) {
-                    out.writeObject("FAILED");
-                    out.writeObject(e.getTargetException());
-                }
-            } catch (Exception e) {
-                service_error(new RMIException(e));
-            } finally {
-                serviceThreads.remove(this);
-                try {
-                    if (out != null) {
-                        out.flush();
-                        out.close();
-                    }
-                    if (in != null) {
-                        in.close();
-                    }
-                    socket.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-
-    }
 
     /**
      Creates a <code>Skeleton</code> with no initial server address. The
@@ -176,26 +70,7 @@ public class Skeleton<T> {
      <code>server</code> is <code>null</code>.
      */
     public Skeleton(Class<T> interfaceClass, T server) {
-        //Checks for null and unsupported class
-        if (server == null) {
-            throw new NullPointerException("Server is null");
-        }
-        if (interfaceClass == null) {
-            throw new NullPointerException("Class is null");
-        }
-
-        if (!interfaceClass.isInterface()) {
-            throw new Error("Given class does not represent remote interface");
-        }
-
-        Method methods[] = interfaceClass.getDeclaredMethods();
-        for (Method method : methods) {
-            Class<?>[] exceptionTypes = method.getExceptionTypes();
-
-            if (!Arrays.asList(exceptionTypes).contains(RMIException.class)) {
-                throw new Error("Given class does not represent remote interface");
-            }
-        }
+        validateInputs(interfaceClass, server);
         //Set the member variables to the parameters passed
         this.interfaceClass = interfaceClass;
         this.server = server;
@@ -221,28 +96,7 @@ public class Skeleton<T> {
      <code>server</code> is <code>null</code>.
      */
     public Skeleton(Class<T> interfaceClass, T server, InetSocketAddress address) {
-        //Checks for null and unsupported class
-        if (server == null) {
-            throw new NullPointerException("Server is null");
-        }
-        if (interfaceClass == null) {
-            throw new NullPointerException("Class is null");
-        }
-
-        if (!interfaceClass.isInterface()) {
-            throw new Error("Given class does not represent remote interface");
-        }
-
-        for (Method method : interfaceClass.getDeclaredMethods()) {
-            Class<?>[] exceptionTypes = method.getExceptionTypes();
-
-            if (!Arrays.asList(exceptionTypes).contains(RMIException.class)) {
-                throw new Error("Given class does not represent remote interface");
-            }
-        }
-        //Set the member variables to the parameters passed
-        this.interfaceClass = interfaceClass;
-        this.server = server;
+        this(interfaceClass, server);
         this.address = address;
     }
 
@@ -346,7 +200,6 @@ public class Skeleton<T> {
                     try {
                         serverSocket = new ServerSocket(i);
                         address = new InetSocketAddress(localIp, serverSocket.getLocalPort());
-                        System.out.println(address);
                         break;
                     } catch (IOException e) {
                         // keep searching
@@ -385,5 +238,153 @@ public class Skeleton<T> {
                 e.printStackTrace();
             }
         }
+    }
+
+    public InetSocketAddress getAddress() {
+        return address;
+    }
+
+    public void setAddress(InetSocketAddress address) {
+        this.address = address;
+    }
+
+    private void validateInputs(Class<T> interfaceClass, T server) {
+        //Checks for null and unsupported class
+        if (server == null) {
+            throw new NullPointerException("Server is null");
+        }
+        if (interfaceClass == null) {
+            throw new NullPointerException("Class is null");
+        }
+
+        if (!isRemoteInterface(interfaceClass)) {
+            throw new Error("Given class does not represent remote interface");
+        }
+    }
+
+    private boolean isRemoteInterface(Class c) {
+
+        if (!c.isInterface()) {
+            return false;
+        }
+
+        for (Method method : c.getDeclaredMethods()) {
+            Class<?>[] exceptionTypes = method.getExceptionTypes();
+
+            if (!Arrays.asList(exceptionTypes).contains(RMIException.class)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    //Definition of ListeningThread class
+    private class ListeningThread extends Thread {
+
+        private boolean stopSignal = false;
+
+        @Override
+        public void run() {
+            try {
+                // Run Server
+                while (true) {
+                    try {
+                        ServiceThread new_thread = new ServiceThread(serverSocket.accept());
+                        new_thread.start();
+                    } catch (IOException e) {
+
+                        if (stopSignal) {
+                            // User closed the server by choice
+                            stopped(null);
+                            break;
+                        } else {
+                            // Some unforseen exception occurred
+                            if (listen_error(e)) {
+                                // if true, server needs to continue accepting connections
+                                continue;
+                            } else {
+                                // else server needs to stop
+                                stopped(e);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } finally {
+                try {
+                    serverSocket.close();
+                } catch (IOException e) {
+                    System.out.println("Could not close server socket, " + e);
+                }
+            }
+        }
+    }
+
+    //Definition of ServiceThread class
+    private class ServiceThread extends Thread {
+        private Socket socket;
+
+        public ServiceThread(Socket socket) {
+            this.socket = socket;
+            serviceThreads.add(this);
+        }
+
+        @Override
+        public void run() {
+            ObjectInputStream in = null;
+            ObjectOutputStream out = null;
+            try {
+                out = new ObjectOutputStream(socket.getOutputStream());
+                out.flush();
+                in = new ObjectInputStream(socket.getInputStream());
+
+                String methodName = (String) in.readObject();
+                Class[] parameterTypes = (Class[]) in.readObject();
+                Object[] args = (Object[]) in.readObject();
+
+                Method method;
+                method = interfaceClass.getMethod(methodName, parameterTypes);
+                Object result = null;
+                try {
+                    result = method.invoke(server, args);
+                    out.writeObject("PASSED");
+
+                    Class returnType = method.getReturnType();
+                    if (!returnType.equals(Void.TYPE)) {
+                        // if result type is void, do nothing.
+                        if (!isRemoteInterface(returnType)) {
+                            // if result type is not void, and not remote interface, serialize the return object
+                            out.writeObject(result);
+                        } else {
+                            // Object is ROR
+                            // create and start skeleton and return stub of this skeleton
+                            Skeleton rorSkeleton = new Skeleton(returnType, result);
+                            rorSkeleton.start();
+                            out.writeObject(Stub.create(returnType, rorSkeleton.getAddress()));
+                        }
+                    }
+                } catch (InvocationTargetException e) {
+                    out.writeObject("FAILED");
+                    out.writeObject(e.getTargetException());
+                }
+            } catch (Exception e) {
+                service_error(new RMIException(e));
+            } finally {
+                serviceThreads.remove(this);
+                try {
+                    if (out != null) {
+                        out.flush();
+                        out.close();
+                    }
+                    if (in != null) {
+                        in.close();
+                    }
+                    socket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
     }
 }
