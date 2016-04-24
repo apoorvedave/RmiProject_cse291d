@@ -12,9 +12,19 @@ import java.net.InetSocketAddress;
  */
 public class PingPongClient {
     public static void main(String[] args) throws RMIException {
-        InetSocketAddress address = new InetSocketAddress(9000);
+        InetSocketAddress address = new InetSocketAddress(args[0], Integer.parseInt(args[1]));
         PingPongFactory factory = Stub.create(PingPongFactory.class, address);
         PingPongServer stub = factory.makeServer();
-        System.out.println(stub.pong(42));;
+        int total = 0;
+        int fail = 0;
+        for (int i = 0; i < 4; i++) {
+            total++;
+            String result = stub.pong(i);
+            System.out.println(result);
+            if (!result.equals("pong " + i)) {
+                fail++;
+            }
+            System.out.println(total +" tests completed, " + fail + " tests Failed");
+        }
     }
 }
