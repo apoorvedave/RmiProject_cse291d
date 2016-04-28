@@ -22,8 +22,6 @@ public class MyDriver {
 
             //Registry registry = Stub.create(Registry.class, new InetSocketAddress("localhost", 10001));
             //registry.rebind(name, adder);
-
-            System.out.println("Adder Bound");
         } catch (Exception e) {
             System.out.println("Exception Occured:");
             e.printStackTrace();

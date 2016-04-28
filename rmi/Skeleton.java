@@ -5,6 +5,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -154,6 +155,8 @@ public class Skeleton<T> {
      connections, <code>false</code> if the server is to shut down.
      */
     protected boolean listen_error(Exception exception) {
+        //TODO: stop(); the server
+        // FIXME:
         return false;
     }
 
@@ -185,12 +188,11 @@ public class Skeleton<T> {
     public synchronized void start() throws RMIException {
 
         // Checks
-        if (listeningThread == null) {
-            listeningThread = new ListeningThread();
-        } else if (listeningThread.isAlive()) {
+        if (listeningThread != null && listeningThread.isAlive()) {
             throw new RMIException("Server already running");
         }
 
+        listeningThread = new ListeningThread();
         // Create Server socket if not present else use it
         try {
             if (address == null) {
@@ -207,7 +209,7 @@ public class Skeleton<T> {
                 }
                 // TODO: Option 2: throw error
 
-            } else if (serverSocket == null) {
+            } else if (serverSocket == null || serverSocket.isClosed()) {
                 serverSocket = new ServerSocket(address.getPort());
             }
 
@@ -385,6 +387,5 @@ public class Skeleton<T> {
                 }
             }
         }
-
     }
 }

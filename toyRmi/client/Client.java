@@ -17,8 +17,8 @@ public class Client {
             //Registry registry = LocateRegistry.getRegistry(registryAddress);
             //MyRemoteInterface stub = (MyRemoteInterface) registry.lookup(name);
             MyRemoteInterface stub = Stub.create(MyRemoteInterface.class, address);
-            stub.disp(6);
-            //System.out.println(stub.add(6, 80));
+            //stub.disp(6);
+            System.out.println(stub.add(6, 80));
         } catch (Exception e) {
             e.printStackTrace();
         }
