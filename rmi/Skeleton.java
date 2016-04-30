@@ -5,7 +5,6 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -197,17 +196,9 @@ public class Skeleton<T> {
         try {
             if (address == null) {
                 String localIp = InetAddress.getLocalHost().getHostAddress();
-                // Option 1: Get some free port and assign: moving with this
-                for (int i = MIN_PORT; i < MAX_PORT; i++) {
-                    try {
-                        serverSocket = new ServerSocket(i);
-                        address = new InetSocketAddress(localIp, serverSocket.getLocalPort());
-                        break;
-                    } catch (IOException e) {
-                        // keep searching
-                    }
-                }
-                // TODO: Option 2: throw error
+                // Get some free port and assign: moving with this
+                serverSocket = new ServerSocket(0);
+                address = new InetSocketAddress(localIp, serverSocket.getLocalPort());
 
             } else if (serverSocket == null || serverSocket.isClosed()) {
                 serverSocket = new ServerSocket(address.getPort());
