@@ -38,9 +38,6 @@ import java.util.Set;
  */
 public class Skeleton<T> {
 
-    private static final int MAX_PORT = 65535;
-    private static final int MIN_PORT = 49152;
-
     /* Private member variables */
     private Class<T> interfaceClass;
     private T server;
@@ -227,7 +224,9 @@ public class Skeleton<T> {
             listeningThread.stopSignal = true;
             try {
                 serverSocket.close();
-            } catch (IOException e) {
+                listeningThread.join();
+                stopped(null);
+            } catch (IOException | InterruptedException e) {
                 e.printStackTrace();
             }
         }
@@ -288,7 +287,7 @@ public class Skeleton<T> {
 
                         if (stopSignal) {
                             // User closed the server by choice
-                            stopped(null);
+                            // stopped(null);
                             break;
                         } else {
                             // Some unforseen exception occurred
