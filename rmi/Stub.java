@@ -114,7 +114,7 @@ public abstract class Stub implements Serializable {
 
         validateClass(c);
 
-        if (0 == skeleton.getAddress().getPort()) {
+        if (null == skeleton.getAddress() || 0 == skeleton.getAddress().getPort()) {
             throw new IllegalStateException("Skeleton not initialized with port number");
         }
 
